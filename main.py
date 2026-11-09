@@ -200,7 +200,7 @@ def _download_once(url: str, folder: str, mode: str, quality: str, attempt_optio
     for key in ("filepath", "_filename"):
         if info.get(key):
             candidates.append(Path(info[key]))
-    candidates.extend(p for p in Path(folder).rglob("*") if p.is_file() and p.suffix.lower() in allowed)
+    candidates.extend(p for p in Path(attempt_folder).rglob("*") if p.is_file() and p.suffix.lower() in allowed)
     files, seen = [], set()
     for path in candidates:
         try:
@@ -228,8 +228,10 @@ def download_media(url: str, folder: str, mode: str, quality: str) -> tuple[str,
     for attempt in range(max_attempts):
         profile_name, attempt_options = profiles[attempt] if is_yt else ("standard", {})
         try:
+            attempt_folder = str(Path(folder) / ("attempt-" + str(attempt + 1)))
+            Path(attempt_folder).mkdir(parents=True, exist_ok=True)
             log.info("Smart download attempt %s/%s profile=%s", attempt + 1, max_attempts, profile_name)
-            info = _preflight(url, folder, attempt_options)
+            info = _preflight(url, attempt_folder, attempt_options)
             duration = info.get("duration")
             if duration is not None and duration > MAX_DURATION_SECONDS:
                 raise ValueError(f"مدة الفيديو أطول من {MAX_DURATION_SECONDS // 60} دقيقة.")
@@ -237,12 +239,12 @@ def download_media(url: str, folder: str, mode: str, quality: str) -> tuple[str,
             if approx and approx > MAX_FILE_BYTES:
                 raise ValueError(f"الحجم المتوقع أكبر من {MAX_FILE_MB}MB.")
             try:
-                return _download_once(url, folder, mode, quality, attempt_options)
+                return _download_once(url, attempt_folder, mode, quality, attempt_options)
             except yt_dlp.utils.DownloadError:
                 host = (urlparse(url).hostname or "").lower()
                 is_instagram = host == "instagram.com" or host.endswith(".instagram.com")
                 if is_instagram and shutil.which("gallery-dl"):
-                    command = ["gallery-dl", "--quiet", "--no-mtime", "--directory", folder,
+                    command = ["gallery-dl", "--quiet", "--no-mtime", "--directory", attempt_folder,
                                "--filter", "extension in (\u0027mp4\u0027, \u0027mkv\u0027, \u0027webm\u0027, \u0027mov\u0027, \u0027m4v\u0027)", url]
                     subprocess.run(command, check=True, capture_output=True, text=True, timeout=180)
                     found = [p for p in Path(folder).rglob("*") if p.is_file() and p.suffix.lower() in {".mp4", ".mkv", ".webm", ".mov", ".m4v"}]
@@ -250,7 +252,7 @@ def download_media(url: str, folder: str, mode: str, quality: str) -> tuple[str,
                         raise FileNotFoundError("لم يتم العثور على ملف وسائط من Instagram.")
                     source = max(found, key=lambda p: p.stat().st_mtime)
                     if mode == "audio":
-                        final = Path(folder) / (source.stem + ".mp3")
+                        final = Path(attempt_folder) / (source.stem + ".mp3")
                         subprocess.run(["ffmpeg", "-y", "-i", str(source), "-vn", "-codec:a", "libmp3lame", "-b:a", "192k", str(final)], check=True, capture_output=True, text=True, timeout=180)
                     else:
                         final = source
