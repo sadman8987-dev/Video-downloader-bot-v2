@@ -16,8 +16,9 @@ RUN apt-get update \
 WORKDIR /app
 COPY requirements.txt .
 RUN python -m pip install --upgrade pip wheel \
-    && pip install -r requirements.txt \
-    && python -m pip install --no-cache-dir --upgrade 'setuptools>=78.1.1'
+    && python -m pip install -r requirements.txt \
+    && python -m pip install --no-cache-dir --upgrade --force-reinstall 'setuptools>=78.1.1' \
+    && python -c "import setuptools; assert tuple(map(int, setuptools.__version__.split('.')[:2])) >= (78, 1), setuptools.__version__"
 
 COPY main.py youtube_handler.py smart_download_engine.py ./
 RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin botuser \
