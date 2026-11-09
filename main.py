@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 
 import yt_dlp
 from youtube_handler import is_youtube_url, youtube_extractor_options, youtube_format, youtube_error_message
+from smart_download_engine import youtube_attempt_profiles, merge_extractor_options
 import sentry_sdk
 from redis.asyncio import Redis
 from aiogram import Bot, Dispatcher, F, Router
@@ -130,7 +131,7 @@ def _extractor_options(url: str, folder: str | None = None) -> dict:
         options.update(youtube_extractor_options(folder))
     return options
 
-def _preflight(url: str, folder: str) -> dict:
+def _preflight(url: str, folder: str, attempt_options: dict | None = None) -> dict:
     opts = {
         "quiet": True,
         "no_warnings": True,
@@ -140,11 +141,13 @@ def _preflight(url: str, folder: str) -> dict:
         "retries": 2,
         **_extractor_options(url, folder),
     }
+    if attempt_options and is_youtube_url(url):
+        opts.update(merge_extractor_options({}, attempt_options))
     with yt_dlp.YoutubeDL(opts) as ydl:
         return ydl.extract_info(url, download=False)
 
 
-def _download_once(url: str, folder: str, mode: str, quality: str) -> tuple[str, dict]:
+def _download_once(url: str, folder: str, mode: str, quality: str, attempt_options: dict | None = None) -> tuple[str, dict]:
     outtmpl = str(Path(folder) / "%(title).80s-%(id)s.%(ext)s")
     fmt = youtube_format(mode, quality) if is_youtube_url(url) else (
         "bestaudio/best" if mode == "audio" else (
@@ -172,6 +175,8 @@ def _download_once(url: str, folder: str, mode: str, quality: str) -> tuple[str,
         "restrictfilenames": True,
         **_extractor_options(url, folder),
     }
+    if attempt_options and is_youtube_url(url):
+        opts.update(merge_extractor_options({}, attempt_options))
     if ENABLE_ARIA2 and shutil.which("aria2c"):
         opts["external_downloader"] = {"http": "aria2c", "https": "aria2c"}
         opts["external_downloader_args"] = {
@@ -216,10 +221,15 @@ def _download_once(url: str, folder: str, mode: str, quality: str) -> tuple[str,
 
 
 def download_media(url: str, folder: str, mode: str, quality: str) -> tuple[str, dict]:
+    is_yt = is_youtube_url(url)
+    profiles = youtube_attempt_profiles(bool(YOUTUBE_COOKIES_BASE64)) if is_yt else [("standard", {})]
+    max_attempts = len(profiles) if is_yt else 3
     last_error = None
-    for attempt in range(1, 4):
+    for attempt in range(max_attempts):
+        profile_name, attempt_options = profiles[attempt] if is_yt else ("standard", {})
         try:
-            info = _preflight(url, folder)
+            log.info("Smart download attempt %s/%s profile=%s", attempt + 1, max_attempts, profile_name)
+            info = _preflight(url, folder, attempt_options)
             duration = info.get("duration")
             if duration is not None and duration > MAX_DURATION_SECONDS:
                 raise ValueError(f"مدة الفيديو أطول من {MAX_DURATION_SECONDS // 60} دقيقة.")
@@ -227,32 +237,21 @@ def download_media(url: str, folder: str, mode: str, quality: str) -> tuple[str,
             if approx and approx > MAX_FILE_BYTES:
                 raise ValueError(f"الحجم المتوقع أكبر من {MAX_FILE_MB}MB.")
             try:
-                return _download_once(url, folder, mode, quality)
+                return _download_once(url, folder, mode, quality, attempt_options)
             except yt_dlp.utils.DownloadError:
                 host = (urlparse(url).hostname or "").lower()
                 is_instagram = host == "instagram.com" or host.endswith(".instagram.com")
                 if is_instagram and shutil.which("gallery-dl"):
-                    command = [
-                        "gallery-dl", "--quiet", "--no-mtime",
-                        "--directory", folder,
-                        "--filter", "extension in ('mp4', 'mkv', 'webm', 'mov', 'm4v')",
-                        url,
-                    ]
+                    command = ["gallery-dl", "--quiet", "--no-mtime", "--directory", folder,
+                               "--filter", "extension in (\u0027mp4\u0027, \u0027mkv\u0027, \u0027webm\u0027, \u0027mov\u0027, \u0027m4v\u0027)", url]
                     subprocess.run(command, check=True, capture_output=True, text=True, timeout=180)
-                    found = [
-                        p for p in Path(folder).rglob("*")
-                        if p.is_file() and p.suffix.lower() in {".mp4", ".mkv", ".webm", ".mov", ".m4v"}
-                    ]
+                    found = [p for p in Path(folder).rglob("*") if p.is_file() and p.suffix.lower() in {".mp4", ".mkv", ".webm", ".mov", ".m4v"}]
                     if not found:
                         raise FileNotFoundError("لم يتم العثور على ملف وسائط من Instagram.")
                     source = max(found, key=lambda p: p.stat().st_mtime)
                     if mode == "audio":
                         final = Path(folder) / (source.stem + ".mp3")
-                        subprocess.run(
-                            ["ffmpeg", "-y", "-i", str(source), "-vn", "-codec:a", "libmp3lame",
-                             "-b:a", "192k", str(final)],
-                            check=True, capture_output=True, text=True, timeout=180,
-                        )
+                        subprocess.run(["ffmpeg", "-y", "-i", str(source), "-vn", "-codec:a", "libmp3lame", "-b:a", "192k", str(final)], check=True, capture_output=True, text=True, timeout=180)
                     else:
                         final = source
                     if final.stat().st_size > MAX_FILE_BYTES:
@@ -263,9 +262,9 @@ def download_media(url: str, folder: str, mode: str, quality: str) -> tuple[str,
             raise
         except Exception as exc:
             last_error = exc
-            log.warning("Download attempt %s/3 failed (%s)", attempt, type(exc).__name__)
-            if attempt < 3:
-                time.sleep(attempt * 2)
+            log.warning("Smart download attempt %s/%s profile=%s failed (%s)", attempt + 1, max_attempts, profile_name, type(exc).__name__)
+            if attempt + 1 < max_attempts:
+                time.sleep(min(2 + attempt * 2, 8))
     raise last_error
 
 
