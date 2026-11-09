@@ -331,18 +331,34 @@ async def download_via_unified_api(url: str, folder: str, mode: str, quality: st
             title = unquote(response.headers.get("X-Media-Title", "ملف"))
             return str(target), {"title": title, "extractor": "unified-media-api"}
 
-def build_quality_keyboard(token: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="360p", callback_data=f"dl:q360:{token}"),
-            InlineKeyboardButton(text="480p", callback_data=f"dl:q480:{token}"),
-        ],
-        [
-            InlineKeyboardButton(text="720p HD", callback_data=f"dl:q720:{token}"),
-            InlineKeyboardButton(text="1080p", callback_data=f"dl:q1080:{token}"),
-        ],
-        [InlineKeyboardButton(text="⭐ أعلى جودة", callback_data=f"dl:qbest:{token}")],
-    ])
+def build_quality_keyboard(token: str, heights: list[int]) -> InlineKeyboardMarkup:
+    rows = []
+    buttons = [
+        InlineKeyboardButton(
+            text=f"{height}p" + (" HD" if height >= 720 else ""),
+            callback_data=f"dl:q{height}:{token}",
+        )
+        for height in sorted(set(heights), reverse=True)[:8]
+    ]
+    for index in range(0, len(buttons), 2):
+        rows.append(buttons[index:index + 2])
+    rows.append([InlineKeyboardButton(text="⭐ أعلى جودة متاحة", callback_data=f"dl:qbest:{token}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def available_video_heights(url: str) -> list[int]:
+    """Inspect the source and return only heights actually offered by the platform."""
+    resolved_url = resolve_linkedin_short_url(url)
+    with tempfile.TemporaryDirectory(prefix="media-probe-") as folder:
+        info = _preflight(resolved_url, folder)
+    heights = {
+        int(item["height"])
+        for item in (info.get("formats") or [])
+        if item.get("height") and str(item.get("height")).isdigit()
+    }
+    if info.get("height"):
+        heights.add(int(info["height"]))
+    return sorted(heights, reverse=True)
 
 
 @router.message(CommandStart())
@@ -393,13 +409,27 @@ async def choose_download(callback: CallbackQuery, bot: Bot):
         await callback.message.edit_text("انتهى الاختيار. ابعت الرابط مرة تانية.")
         return
     if choice == "video":
-        await callback.message.edit_text("اختار جودة الفيديو:", reply_markup=build_quality_keyboard(token))
+        await callback.message.edit_text("⏳ بفحص الجودات المتاحة على الرابط...")
+        try:
+            heights = await asyncio.wait_for(
+                asyncio.to_thread(available_video_heights, url),
+                timeout=45,
+            )
+        except Exception as exc:
+            log.info("Could not inspect available formats (%s); showing best-quality fallback", type(exc).__name__)
+            heights = []
+        await callback.message.edit_text(
+            "اختار الجودة المتاحة للفيديو:" if heights else "لم أتمكن من قراءة قائمة الجودات؛ جرّب أعلى جودة متاحة:",
+            reply_markup=build_quality_keyboard(token, heights),
+        )
         return
     if choice == "audio":
         mode, quality = "audio", "best"
     elif choice.startswith("q"):
         mode = "video"
-        quality = {"q360": "360", "q480": "480", "q720": "720", "q1080": "1080", "qbest": "best"}.get(choice)
+        quality = "best" if choice == "qbest" else (
+            choice[1:] if choice.startswith("q") and choice[1:].isdigit() else None
+        )
         if not quality:
             await callback.message.edit_text("اختيار الجودة غير صالح.")
             return
