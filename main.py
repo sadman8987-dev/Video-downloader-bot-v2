@@ -270,6 +270,38 @@ def download_media(url: str, folder: str, mode: str, quality: str) -> tuple[str,
     raise last_error
 
 
+
+async def download_via_unified_api(url: str, folder: str, mode: str, quality: str) -> tuple[str, dict]:
+    """Use the separate unified engine when configured; otherwise preserve local behavior."""
+    api_url = os.getenv("DOWNLOAD_ENGINE_API_URL", "").strip().rstrip("/")
+    api_key = os.getenv("DOWNLOAD_ENGINE_API_KEY", "").strip()
+    if not api_url or not api_key:
+        return await asyncio.to_thread(download_media, url, folder, mode, quality)
+
+    import aiohttp
+    timeout = aiohttp.ClientTimeout(total=DOWNLOAD_TIMEOUT + 60, connect=15, sock_read=DOWNLOAD_TIMEOUT)
+    payload = {"url": url, "kind": mode, "quality": quality}
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(
+            f"{api_url}/download",
+            json=payload,
+            headers={"X-API-Key": api_key},
+        ) as response:
+            if response.status != 200:
+                detail = (await response.text())[:700]
+                raise RuntimeError(f"محرك التنزيل الموحد أعاد HTTP {response.status}: {detail}")
+            filename = response.headers.get("X-Filename", "download.bin")
+            from urllib.parse import unquote
+            filename = Path(unquote(filename)).name or "download.bin"
+            target = Path(folder) / filename
+            with target.open("wb") as output:
+                async for chunk in response.content.iter_chunked(1024 * 1024):
+                    output.write(chunk)
+            if not target.exists() or target.stat().st_size <= 0:
+                raise RuntimeError("محرك التنزيل الموحد أعاد ملفًا فارغًا.")
+            title = unquote(response.headers.get("X-Media-Title", "ملف"))
+            return str(target), {"title": title, "extractor": "unified-media-api"}
+
 def build_quality_keyboard(token: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
@@ -367,8 +399,8 @@ async def choose_download(callback: CallbackQuery, bot: Bot):
         async with download_slots:
             with tempfile.TemporaryDirectory(prefix="telegram-media-") as folder:
                 filename, info = await asyncio.wait_for(
-                    asyncio.to_thread(download_media, url, folder, mode, quality),
-                    timeout=DOWNLOAD_TIMEOUT,
+                    download_via_unified_api(url, folder, mode, quality),
+                    timeout=DOWNLOAD_TIMEOUT + 90,
                 )
                 size = Path(filename).stat().st_size
                 title = str(info.get("title") or "ملف")[:64]
