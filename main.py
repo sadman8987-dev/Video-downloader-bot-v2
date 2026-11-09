@@ -142,7 +142,7 @@ def _preflight(url: str, folder: str, attempt_options: dict | None = None) -> di
         **_extractor_options(url, folder),
     }
     if attempt_options and is_youtube_url(url):
-        opts.update(merge_extractor_options({}, attempt_options))
+        opts.update(merge_extractor_options(opts, attempt_options))
     with yt_dlp.YoutubeDL(opts) as ydl:
         return ydl.extract_info(url, download=False)
 
@@ -176,7 +176,7 @@ def _download_once(url: str, folder: str, mode: str, quality: str, attempt_optio
         **_extractor_options(url, folder),
     }
     if attempt_options and is_youtube_url(url):
-        opts.update(merge_extractor_options({}, attempt_options))
+        opts.update(merge_extractor_options(opts, attempt_options))
     if ENABLE_ARIA2 and shutil.which("aria2c"):
         opts["external_downloader"] = {"http": "aria2c", "https": "aria2c"}
         opts["external_downloader_args"] = {
