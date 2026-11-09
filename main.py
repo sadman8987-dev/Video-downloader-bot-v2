@@ -116,7 +116,7 @@ from youtube_handler import is_youtube_url, youtube_extractor_options, youtube_f
 def _extractor_options(url: str, folder: str | None = None) -> dict:
     host = (urlparse(url).hostname or "").lower()
     options = {}
-    social_hosts = ("facebook.com", "instagram.com", "tiktok.com", "twitter.com", "x.com", "linkedin.com")
+    social_hosts = ("facebook.com", "instagram.com", "tiktok.com", "twitter.com", "x.com", "linkedin.com", "lnkd.in")
     if any(host == domain or host.endswith("." + domain) for domain in social_hosts):
         if SOCIAL_COOKIES_BASE64 and folder:
             try:
