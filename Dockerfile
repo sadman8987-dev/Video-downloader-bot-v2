@@ -19,7 +19,7 @@ RUN python -m pip install --upgrade pip wheel \
     && pip install -r requirements.txt \
     && python -m pip install --no-cache-dir --upgrade 'setuptools>=78.1.1'
 
-COPY main.py youtube_handler.py .
+COPY main.py youtube_handler.py smart_download_engine.py .
 RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin botuser \
     && chown -R botuser:botuser /app
 
