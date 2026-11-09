@@ -240,7 +240,12 @@ def resolve_linkedin_short_url(url: str) -> str:
         raise ValueError("رابط lnkd.in لم يحوّل إلى منشور LinkedIn صالح. افتح الرابط وتأكد أنه متاح للعامة.")
     if not valid_public_url(final_url):
         raise ValueError("رابط LinkedIn النهائي غير صالح أو غير متاح من السيرفر.")
-    return final_url
+    # yt-dlp's LinkedIn extractor matches www.linkedin.com or linkedin.com,
+    # not regional hosts such as ae.linkedin.com. Normalize the host while
+    # preserving the exact post path and query string.
+    from urllib.parse import urlunparse
+    parsed = urlparse(final_url)
+    return urlunparse(("https", "www.linkedin.com", parsed.path, parsed.params, parsed.query, parsed.fragment))
 
 
 def download_media(url: str, folder: str, mode: str, quality: str) -> tuple[str, dict]:
