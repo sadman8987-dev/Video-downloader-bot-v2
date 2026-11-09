@@ -314,10 +314,7 @@ async def help_command(message: Message):
 async def receive_link(message: Message):
     url = (message.text or "").strip()
     if not valid_public_url(url):
-        await message.answer("ابعت رابط HTTPS عام وصحيح.")
-        return
-    if not is_youtube_url(url):
-        await message.answer("البوت مخصص حالياً لـ YouTube وYouTube Music فقط. ابعت رابطاً من youtube.com أو music.youtube.com أو youtu.be.")
+        await message.answer("ابعت رابط HTTP/HTTPS عام وصحيح من منصة مدعومة.")
         return
     token = secrets.token_urlsafe(8).replace("-", "").replace("_", "")[:11]
     await save_pending_link(message.from_user.id, token, url)
