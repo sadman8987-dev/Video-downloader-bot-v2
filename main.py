@@ -200,7 +200,7 @@ def _download_once(url: str, folder: str, mode: str, quality: str, attempt_optio
     for key in ("filepath", "_filename"):
         if info.get(key):
             candidates.append(Path(info[key]))
-    candidates.extend(p for p in Path(attempt_folder).rglob("*") if p.is_file() and p.suffix.lower() in allowed)
+    candidates.extend(p for p in Path(folder).rglob("*") if p.is_file() and p.suffix.lower() in allowed)
     files, seen = [], set()
     for path in candidates:
         try:
@@ -247,7 +247,7 @@ def download_media(url: str, folder: str, mode: str, quality: str) -> tuple[str,
                     command = ["gallery-dl", "--quiet", "--no-mtime", "--directory", attempt_folder,
                                "--filter", "extension in (\u0027mp4\u0027, \u0027mkv\u0027, \u0027webm\u0027, \u0027mov\u0027, \u0027m4v\u0027)", url]
                     subprocess.run(command, check=True, capture_output=True, text=True, timeout=180)
-                    found = [p for p in Path(folder).rglob("*") if p.is_file() and p.suffix.lower() in {".mp4", ".mkv", ".webm", ".mov", ".m4v"}]
+                    found = [p for p in Path(attempt_folder).rglob("*") if p.is_file() and p.suffix.lower() in {".mp4", ".mkv", ".webm", ".mov", ".m4v"}]
                     if not found:
                         raise FileNotFoundError("لم يتم العثور على ملف وسائط من Instagram.")
                     source = max(found, key=lambda p: p.stat().st_mtime)
