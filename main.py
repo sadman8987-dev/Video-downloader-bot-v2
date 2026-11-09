@@ -19,6 +19,7 @@ import sentry_sdk
 from redis.asyncio import Redis
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command, CommandStart
+from aiogram.exceptions import TelegramNetworkError, TelegramServerError
 from aiogram.types import (
     CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup,
     Message, FSInputFile,
@@ -109,8 +110,6 @@ def valid_public_url(raw: str) -> bool:
     except (ValueError, OSError, socket.gaierror):
         return False
 
-
-from youtube_handler import is_youtube_url, youtube_extractor_options, youtube_format
 
 
 def _extractor_options(url: str, folder: str | None = None) -> dict:
@@ -342,6 +341,38 @@ async def download_via_unified_api(url: str, folder: str, mode: str, quality: st
 
     return await asyncio.to_thread(download_media, url, folder, mode, quality)
 
+async def send_media_with_retry(bot: Bot, chat_id: int, filename: str, mode: str, title: str, quality: str) -> None:
+    """Retry transient Telegram upload/network failures without repeating the download."""
+    last_error = None
+    for attempt in range(3):
+        media = FSInputFile(filename, filename=Path(filename).name)
+        try:
+            if mode == "audio":
+                await bot.send_audio(
+                    chat_id=chat_id, audio=media, title=title,
+                    caption="تم التحميل بصيغة MP3",
+                )
+            else:
+                await bot.send_video(
+                    chat_id=chat_id, video=media,
+                    caption=f"{title} | {quality if quality != 'best' else 'أفضل جودة متاحة'}",
+                    supports_streaming=True,
+                )
+            return
+        except (TelegramNetworkError, TelegramServerError) as exc:
+            last_error = exc
+            if attempt == 2:
+                break
+            delay = 1.5 * (2 ** attempt)
+            log.warning(
+                "Telegram upload attempt %s/3 failed (%s); retrying in %.1fs",
+                attempt + 1, type(exc).__name__, delay,
+            )
+            await asyncio.sleep(delay)
+    if last_error is not None:
+        raise last_error
+
+
 def build_quality_keyboard(token: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
@@ -378,7 +409,7 @@ async def help_command(message: Message):
 @router.message(F.text)
 async def receive_link(message: Message):
     url = (message.text or "").strip()
-    if not valid_public_url(url):
+    if not await asyncio.to_thread(valid_public_url, url):
         await message.answer("ابعت رابط HTTP/HTTPS عام وصحيح من منصة مدعومة.")
         return
     token = secrets.token_urlsafe(8).replace("-", "").replace("_", "")[:11]
@@ -453,18 +484,9 @@ async def choose_download(callback: CallbackQuery, bot: Bot):
                     )
                     return
                 await status.edit_text("✅ التحميل اكتمل، جاري الإرسال...")
-                media = FSInputFile(filename, filename=Path(filename).name)
-                if mode == "audio":
-                    await bot.send_audio(
-                        chat_id=callback.message.chat.id, audio=media,
-                        title=title, caption="تم التحميل بصيغة MP3",
-                    )
-                else:
-                    await bot.send_video(
-                        chat_id=callback.message.chat.id, video=media,
-                        caption=f"{title} | {quality if quality != 'best' else 'أفضل جودة متاحة'}",
-                        supports_streaming=True,
-                    )
+                await send_media_with_retry(
+                    bot, callback.message.chat.id, filename, mode, title, quality
+                )
                 await status.edit_text(f"✅ تم الإرسال بنجاح ({size / 1024 / 1024:.1f}MB).")
     except asyncio.TimeoutError:
         await status.edit_text("انتهت مهلة التحميل. جرّب رابطاً آخر أو جودة أقل.")
