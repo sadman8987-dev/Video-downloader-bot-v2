@@ -18,7 +18,7 @@ COPY requirements.txt .
 RUN python -m pip install --upgrade pip wheel \
     && python -m pip install -r requirements.txt \
     && python -m pip install --no-cache-dir --upgrade --force-reinstall 'setuptools>=78.1.1' \
-    && python -c "import setuptools; assert tuple(map(int, setuptools.__version__.split('.')[:2])) >= (78, 1), setuptools.__version__"
+    && python -c "import pathlib, shutil, setuptools; site = pathlib.Path(setuptools.__file__).parent; current = f'setuptools-{setuptools.__version__}.dist-info'; [shutil.rmtree(path) for path in site.glob('setuptools-*.dist-info') if path.name != current]; assert tuple(map(int, setuptools.__version__.split('.')[:2])) >= (78, 1), setuptools.__version__; print('setuptools:', setuptools.__version__); print('remaining metadata:', [p.name for p in site.glob('setuptools-*.dist-info')])"
 
 COPY main.py youtube_handler.py smart_download_engine.py ./
 RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin botuser \
