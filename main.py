@@ -116,7 +116,7 @@ from youtube_handler import is_youtube_url, youtube_extractor_options, youtube_f
 def _extractor_options(url: str, folder: str | None = None) -> dict:
     host = (urlparse(url).hostname or "").lower()
     options = {}
-    social_hosts = ("facebook.com", "instagram.com", "tiktok.com", "twitter.com", "x.com")
+    social_hosts = ("facebook.com", "instagram.com", "tiktok.com", "twitter.com", "x.com", "linkedin.com")
     if any(host == domain or host.endswith("." + domain) for domain in social_hosts):
         if SOCIAL_COOKIES_BASE64 and folder:
             try:
@@ -322,7 +322,7 @@ async def start(message: Message):
         "أهلاً بيك في Video Downloader Bot 🎬\n\n"
         "ابعت رابط فيديو عام، وبعدها اختار فيديو أو صوت MP3 والجودة.\n"
         f"حد التحميل الحالي: {MAX_FILE_MB}MB والمدة: {MAX_DURATION_SECONDS // 60} دقيقة.\n"
-        "قد تختلف الإتاحة حسب المنصة. لا يدعم المحتوى الخاص أو المحمي بـ DRM."
+        "يدعم روابط LinkedIn العامة للفيديوهات؛ وقد تحتاج بعض المنشورات إلى Cookies صالحة عبر SOCIAL_COOKIES_BASE64.\n"\n        "قد تختلف الإتاحة حسب المنصة. لا يدعم المحتوى الخاص أو المحمي بـ DRM."
     )
 
 
