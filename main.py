@@ -272,35 +272,75 @@ def download_media(url: str, folder: str, mode: str, quality: str) -> tuple[str,
 
 
 async def download_via_unified_api(url: str, folder: str, mode: str, quality: str) -> tuple[str, dict]:
-    """Use the separate unified engine when configured; otherwise preserve local behavior."""
+    """
+    Prefer the optional remote engine, but never let its outage disable the bot.
+    If it fails for a transient/API-side reason, transparently fall back to yt-dlp.
+    """
     api_url = os.getenv("DOWNLOAD_ENGINE_API_URL", "").strip().rstrip("/")
     api_key = os.getenv("DOWNLOAD_ENGINE_API_KEY", "").strip()
-    if not api_url or not api_key:
-        return await asyncio.to_thread(download_media, url, folder, mode, quality)
 
-    import aiohttp
-    timeout = aiohttp.ClientTimeout(total=DOWNLOAD_TIMEOUT + 60, connect=15, sock_read=DOWNLOAD_TIMEOUT)
-    payload = {"url": url, "kind": mode, "quality": quality}
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.post(
-            f"{api_url}/download",
-            json=payload,
-            headers={"X-API-Key": api_key},
-        ) as response:
-            if response.status != 200:
-                detail = (await response.text())[:700]
-                raise RuntimeError(f"محرك التنزيل الموحد أعاد HTTP {response.status}: {detail}")
-            filename = response.headers.get("X-Filename", "download.bin")
-            from urllib.parse import unquote
-            filename = Path(unquote(filename)).name or "download.bin"
-            target = Path(folder) / filename
-            with target.open("wb") as output:
-                async for chunk in response.content.iter_chunked(1024 * 1024):
-                    output.write(chunk)
-            if not target.exists() or target.stat().st_size <= 0:
-                raise RuntimeError("محرك التنزيل الموحد أعاد ملفًا فارغًا.")
-            title = unquote(response.headers.get("X-Media-Title", "ملف"))
-            return str(target), {"title": title, "extractor": "unified-media-api"}
+    if api_url and api_key:
+        try:
+            import aiohttp
+            timeout = aiohttp.ClientTimeout(
+                total=DOWNLOAD_TIMEOUT + 30,
+                connect=12,
+                sock_read=DOWNLOAD_TIMEOUT,
+            )
+            payload = {"url": url, "kind": mode, "quality": quality}
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(
+                    f"{api_url}/download",
+                    json=payload,
+                    headers={"X-API-Key": api_key},
+                ) as response:
+                    if response.status != 200:
+                        detail = (await response.text())[:300]
+                        raise RuntimeError(
+                            f"Remote engine HTTP {response.status}: {detail}"
+                        )
+
+                    from urllib.parse import unquote
+                    filename = Path(
+                        unquote(response.headers.get("X-Filename", "download.bin"))
+                    ).name or "download.bin"
+                    target = Path(folder) / filename
+                    declared_size = response.content_length
+                    if declared_size is not None and declared_size > MAX_FILE_BYTES:
+                        raise ValueError(
+                            f"حجم الملف أكبر من الحد المسموح ({MAX_FILE_MB}MB)."
+                        )
+
+                    written = 0
+                    with target.open("wb") as output:
+                        async for chunk in response.content.iter_chunked(256 * 1024):
+                            written += len(chunk)
+                            if written > MAX_FILE_BYTES:
+                                output.close()
+                                target.unlink(missing_ok=True)
+                                raise ValueError(
+                                    f"حجم الملف أكبر من الحد المسموح ({MAX_FILE_MB}MB)."
+                                )
+                            output.write(chunk)
+
+                    if written <= 0:
+                        raise RuntimeError("Remote engine returned an empty file.")
+
+                    title = unquote(response.headers.get("X-Media-Title", "ملف"))
+                    log.info("Download completed using remote engine")
+                    return str(target), {"title": title, "extractor": "unified-media-api"}
+
+        except ValueError:
+            raise
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.warning(
+                "Remote engine failed (%s); falling back to local yt-dlp",
+                type(exc).__name__,
+            )
+
+    return await asyncio.to_thread(download_media, url, folder, mode, quality)
 
 def build_quality_keyboard(token: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
