@@ -117,6 +117,17 @@ def _extractor_options(url: str, folder: str | None = None) -> dict:
     host = (urlparse(url).hostname or "").lower()
     is_youtube = is_youtube_url(url)
     options = {}
+    social_hosts = ("facebook.com", "instagram.com", "tiktok.com", "twitter.com", "x.com")
+    if any(host == domain or host.endswith("." + domain) for domain in social_hosts):
+        if SOCIAL_COOKIES_BASE64 and folder:
+            try:
+                cookie_path = Path(folder) / "social-cookies.txt"
+                if not cookie_path.exists():
+                    cookie_path.write_bytes(base64.b64decode(SOCIAL_COOKIES_BASE64, validate=True))
+                    os.chmod(cookie_path, 0o600)
+                options["cookiefile"] = str(cookie_path)
+            except Exception as exc:
+                log.warning("Social cookies could not be loaded (%s)", type(exc).__name__)
     if is_youtube:
         # YouTube PO tokens help with bot checks; account cookies are optional
         # and must be supplied by the operator as a Railway secret.
