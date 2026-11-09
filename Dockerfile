@@ -15,8 +15,9 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY requirements.txt .
-RUN python -m pip install --upgrade pip setuptools wheel \
-    && pip install -r requirements.txt
+RUN python -m pip install --upgrade pip wheel \
+    && pip install -r requirements.txt \
+    && python -m pip install --no-cache-dir --upgrade 'setuptools>=78.1.1'
 
 COPY main.py .
 RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin botuser \
