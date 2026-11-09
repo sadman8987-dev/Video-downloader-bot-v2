@@ -1,4 +1,4 @@
-aiogram>=3.13,<4.0
+aiogram>=3.22.0,<4.0
 yt-dlp[default] @ git+https://github.com/0xvd/yt-dlp-exp@fix_linkedin
 gallery-dl>=1.29
 streamlink>=7.0
