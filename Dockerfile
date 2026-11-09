@@ -10,7 +10,7 @@ COPY --from=deno /deno /usr/local/bin/deno
 
 RUN apt-get update \
     && apt-get upgrade -y \
-    && apt-get install -y --no-install-recommends ffmpeg aria2 ca-certificates curl \
+    && apt-get install -y --no-install-recommends ffmpeg aria2 ca-certificates curl git \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
