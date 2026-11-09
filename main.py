@@ -390,10 +390,10 @@ async def receive_link(message: Message):
     token = secrets.token_urlsafe(8).replace("-", "").replace("_", "")[:11]
     await save_pending_link(message.from_user.id, token, url)
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="🎬 فيديو", callback_data=f"dl:video:{token}"),
-        InlineKeyboardButton(text="🎵 صوت MP3", callback_data=f"dl:audio:{token}"),
+        InlineKeyboardButton(text="🎥 تحويل إلى فيديو", callback_data=f"dl:video:{token}"),
+        InlineKeyboardButton(text="🎧 تحويل إلى صوت MP3", callback_data=f"dl:audio:{token}"),
     ]])
-    await message.answer("اختار نوع التحميل:", reply_markup=keyboard)
+    await message.answer("اختار صيغة التحويل:", reply_markup=keyboard)
 
 
 @router.callback_query(F.data.startswith("dl:"))
