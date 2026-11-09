@@ -33,6 +33,7 @@ DOWNLOAD_TIMEOUT = int(os.getenv("DOWNLOAD_TIMEOUT_SECONDS", "600"))
 MAX_CONCURRENT_DOWNLOADS = max(1, int(os.getenv("MAX_CONCURRENT_DOWNLOADS", "2")))
 ENABLE_ARIA2 = os.getenv("ENABLE_ARIA2", "false").lower() in {"1", "true", "yes"}
 BGUTIL_POT_BASE_URL = os.getenv("BGUTIL_POT_BASE_URL", "").strip()
+YOUTUBE_COOKIES_BASE64 = os.getenv("YOUTUBE_COOKIES_BASE64", "").strip()
 SOCIAL_COOKIES_BASE64 = os.getenv("SOCIAL_COOKIES_BASE64", "").strip()
 REDIS_URL = os.getenv("REDIS_URL", "").strip()
 SENTRY_DSN = os.getenv("SENTRY_DSN", "").strip()
@@ -107,27 +108,31 @@ def valid_public_url(raw: str) -> bool:
         return False
 
 
+def is_youtube_url(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower().rstrip(".")
+    return host == "youtu.be" or host == "youtube.com" or host.endswith(".youtube.com")
+
+
 def _extractor_options(url: str, folder: str | None = None) -> dict:
     host = (urlparse(url).hostname or "").lower()
-    is_youtube = host == "youtu.be" or host == "youtube.com" or host.endswith(".youtube.com")
+    is_youtube = is_youtube_url(url)
     options = {}
-    social_hosts = ("facebook.com", "instagram.com", "tiktok.com", "twitter.com", "x.com")
-    if any(host == domain or host.endswith("." + domain) for domain in social_hosts):
-        if SOCIAL_COOKIES_BASE64 and folder:
-            try:
-                cookie_path = Path(folder) / "social-cookies.txt"
-                if not cookie_path.exists():
-                    cookie_path.write_bytes(base64.b64decode(SOCIAL_COOKIES_BASE64, validate=True))
-                    os.chmod(cookie_path, 0o600)
-                options["cookiefile"] = str(cookie_path)
-            except Exception as exc:
-                log.warning("Social cookies could not be loaded (%s)", type(exc).__name__)
     if is_youtube:
-        # The provider is optional: use it only when an internal endpoint was configured.
+        # YouTube PO tokens help with bot checks; account cookies are optional
+        # and must be supplied by the operator as a Railway secret.
         if BGUTIL_POT_BASE_URL:
             options["extractor_args"] = {
                 "youtubepot-bgutilhttp": {"base_url": [BGUTIL_POT_BASE_URL]}
             }
+        if YOUTUBE_COOKIES_BASE64 and folder:
+            try:
+                cookie_path = Path(folder) / "youtube-cookies.txt"
+                if not cookie_path.exists():
+                    cookie_path.write_bytes(base64.b64decode(YOUTUBE_COOKIES_BASE64, validate=True))
+                    os.chmod(cookie_path, 0o600)
+                options["cookiefile"] = str(cookie_path)
+            except Exception as exc:
+                log.warning("YouTube cookies could not be loaded (%s)", type(exc).__name__)
     return options
 
 
@@ -309,7 +314,10 @@ async def help_command(message: Message):
 async def receive_link(message: Message):
     url = (message.text or "").strip()
     if not valid_public_url(url):
-        await message.answer("ابعت رابط HTTP/HTTPS عام وصحيح من منصة مدعومة.")
+        await message.answer("ابعت رابط HTTPS عام وصحيح.")
+        return
+    if not is_youtube_url(url):
+        await message.answer("البوت مخصص حالياً لـ YouTube وYouTube Music فقط. ابعت رابطاً من youtube.com أو music.youtube.com أو youtu.be.")
         return
     token = secrets.token_urlsafe(8).replace("-", "").replace("_", "")[:11]
     await save_pending_link(message.from_user.id, token, url)
