@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import yt_dlp
+from youtube_handler import is_youtube_url, youtube_extractor_options, youtube_format, youtube_error_message
 import sentry_sdk
 from redis.asyncio import Redis
 from aiogram import Bot, Dispatcher, F, Router
@@ -108,14 +109,11 @@ def valid_public_url(raw: str) -> bool:
         return False
 
 
-def is_youtube_url(url: str) -> bool:
-    host = (urlparse(url).hostname or "").lower().rstrip(".")
-    return host == "youtu.be" or host == "youtube.com" or host.endswith(".youtube.com")
+from youtube_handler import is_youtube_url, youtube_extractor_options, youtube_format
 
 
 def _extractor_options(url: str, folder: str | None = None) -> dict:
     host = (urlparse(url).hostname or "").lower()
-    is_youtube = is_youtube_url(url)
     options = {}
     social_hosts = ("facebook.com", "instagram.com", "tiktok.com", "twitter.com", "x.com")
     if any(host == domain or host.endswith("." + domain) for domain in social_hosts):
@@ -128,24 +126,9 @@ def _extractor_options(url: str, folder: str | None = None) -> dict:
                 options["cookiefile"] = str(cookie_path)
             except Exception as exc:
                 log.warning("Social cookies could not be loaded (%s)", type(exc).__name__)
-    if is_youtube:
-        # YouTube PO tokens help with bot checks; account cookies are optional
-        # and must be supplied by the operator as a Railway secret.
-        if BGUTIL_POT_BASE_URL:
-            options["extractor_args"] = {
-                "youtubepot-bgutilhttp": {"base_url": [BGUTIL_POT_BASE_URL]}
-            }
-        if YOUTUBE_COOKIES_BASE64 and folder:
-            try:
-                cookie_path = Path(folder) / "youtube-cookies.txt"
-                if not cookie_path.exists():
-                    cookie_path.write_bytes(base64.b64decode(YOUTUBE_COOKIES_BASE64, validate=True))
-                    os.chmod(cookie_path, 0o600)
-                options["cookiefile"] = str(cookie_path)
-            except Exception as exc:
-                log.warning("YouTube cookies could not be loaded (%s)", type(exc).__name__)
+    if is_youtube_url(url):
+        options.update(youtube_extractor_options(folder))
     return options
-
 
 def _preflight(url: str, folder: str) -> dict:
     opts = {
@@ -163,14 +146,12 @@ def _preflight(url: str, folder: str) -> dict:
 
 def _download_once(url: str, folder: str, mode: str, quality: str) -> tuple[str, dict]:
     outtmpl = str(Path(folder) / "%(title).80s-%(id)s.%(ext)s")
-    if mode == "audio":
-        fmt = "bestaudio/best"
-    else:
-        height = "" if quality == "best" else f"[height<={quality}]"
-        fmt = (
-            f"best{height}[ext=mp4]/best{height}/"
-            f"best[ext=mp4]/best"
+    fmt = youtube_format(mode, quality) if is_youtube_url(url) else (
+        "bestaudio/best" if mode == "audio" else (
+            f"best[height<={quality}][ext=mp4]/best[height<={quality}]/best[ext=mp4]/best"
+            if quality != "best" else "best[ext=mp4]/best"
         )
+    )
 
     opts = {
         "format": fmt,
@@ -418,8 +399,10 @@ async def choose_download(callback: CallbackQuery, bot: Bot):
         sentry_sdk.capture_exception(exc)
         detail = str(exc).lower()
         log.warning("Extractor/download failure: %s", str(exc)[:700])
-        if "sign in to confirm" in detail or "not a bot" in detail:
-            msg = "يوتيوب طلب تحقق/تسجيل دخول من السيرفر؛ جرّب رابطاً عاماً آخر أو منصة أخرى."
+        if is_youtube_url(url):
+            msg = youtube_error_message(exc)
+        elif "sign in to confirm" in detail or "not a bot" in detail:
+            msg = "المنصة طلبت تحقق/تسجيل دخول من السيرفر؛ جرّب رابطاً عاماً آخر."
         else:
             msg = "المنصة رفضت التحميل أو الرابط/الجودة غير متاحين حالياً. جرّب جودة أقل."
         await status.edit_text("❌ " + msg)
