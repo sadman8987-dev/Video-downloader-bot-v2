@@ -220,7 +220,31 @@ def _download_once(url: str, folder: str, mode: str, quality: str, attempt_optio
     return str(final), info
 
 
+def resolve_linkedin_short_url(url: str) -> str:
+    """Expand lnkd.in short links before passing the real LinkedIn URL to yt-dlp."""
+    host = (urlparse(url).hostname or "").lower()
+    if host != "lnkd.in" and not host.endswith(".lnkd.in"):
+        return url
+    import requests
+    response = requests.get(
+        url,
+        allow_redirects=True,
+        stream=True,
+        timeout=(10, 20),
+        headers={"User-Agent": "Mozilla/5.0"},
+    )
+    final_url = response.url
+    response.close()
+    final_host = (urlparse(final_url).hostname or "").lower()
+    if not (final_host == "linkedin.com" or final_host.endswith(".linkedin.com")):
+        raise ValueError("رابط lnkd.in لم يحوّل إلى منشور LinkedIn صالح. افتح الرابط وتأكد أنه متاح للعامة.")
+    if not valid_public_url(final_url):
+        raise ValueError("رابط LinkedIn النهائي غير صالح أو غير متاح من السيرفر.")
+    return final_url
+
+
 def download_media(url: str, folder: str, mode: str, quality: str) -> tuple[str, dict]:
+    url = resolve_linkedin_short_url(url)
     is_yt = is_youtube_url(url)
     profiles = youtube_attempt_profiles(bool(YOUTUBE_COOKIES_BASE64)) if is_yt else [("standard", {})]
     max_attempts = len(profiles) if is_yt else 3
